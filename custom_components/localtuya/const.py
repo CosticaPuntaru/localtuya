@@ -36,6 +36,9 @@ CONF_PRODUCT_KEY = "product_key"
 CONF_PRODUCT_NAME = "product_name"
 CONF_USER_ID = "user_id"
 CONF_ENABLE_ADD_ENTITIES = "add_entities"
+CONF_CONNECT_TIMEOUT = "connect_timeout"
+
+DEFAULT_CONNECT_TIMEOUT = 10
 
 
 CONF_ACTION = "action"
