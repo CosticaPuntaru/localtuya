@@ -44,6 +44,8 @@ from .const import (
     CONF_SETUP_CLOUD,
     CONF_USER_ID,
     CONF_ENABLE_ADD_ENTITIES,
+    CONF_CONNECT_TIMEOUT,
+    DEFAULT_CONNECT_TIMEOUT,
     DATA_CLOUD,
     DATA_DISCOVERY,
     DOMAIN,
@@ -81,6 +83,7 @@ CLOUD_SETUP_SCHEMA = vol.Schema(
         vol.Optional(CONF_USER_ID): cv.string,
         vol.Optional(CONF_USERNAME, default=DOMAIN): cv.string,
         vol.Required(CONF_NO_CLOUD, default=False): bool,
+        vol.Required(CONF_CONNECT_TIMEOUT, default=DEFAULT_CONNECT_TIMEOUT): int,
     }
 )
 
@@ -95,6 +98,7 @@ DEVICE_SCHEMA = vol.Schema(
             ["3.1", "3.2", "3.3", "3.4"]
         ),
         vol.Required(CONF_ENABLE_DEBUG, default=False): bool,
+        vol.Optional(CONF_CONNECT_TIMEOUT): int,
         vol.Optional(CONF_SCAN_INTERVAL): int,
         vol.Optional(CONF_MANUAL_DPS): cv.string,
         vol.Optional(CONF_RESET_DPIDS): str,
@@ -141,6 +145,7 @@ def options_schema(entities):
                 ["3.1", "3.2", "3.3", "3.4"]
             ),
             vol.Required(CONF_ENABLE_DEBUG, default=False): bool,
+            vol.Optional(CONF_CONNECT_TIMEOUT): int,
             vol.Optional(CONF_SCAN_INTERVAL): int,
             vol.Optional(CONF_MANUAL_DPS): cv.string,
             vol.Optional(CONF_RESET_DPIDS): cv.string,
@@ -231,7 +236,7 @@ def config_schema():
     )
 
 
-async def validate_input(hass: core.HomeAssistant, data):
+async def validate_input(hass: core.HomeAssistant, data, default_timeout=DEFAULT_CONNECT_TIMEOUT):
     """Validate the user input allows us to connect."""
     detected_dps = {}
 
@@ -245,6 +250,7 @@ async def validate_input(hass: core.HomeAssistant, data):
             data[CONF_LOCAL_KEY],
             float(data[CONF_PROTOCOL_VERSION]),
             data[CONF_ENABLE_DEBUG],
+            timeout=data.get(CONF_CONNECT_TIMEOUT, default_timeout),
         )
         if CONF_RESET_DPIDS in data:
             reset_ids_str = data[CONF_RESET_DPIDS].split(",")
@@ -592,7 +598,10 @@ class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
                         ]
                         return await self.async_step_configure_entity()
 
-                self.dps_strings = await validate_input(self.hass, user_input)
+                timeout = self.config_entry.data.get(
+                    CONF_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT
+                )
+                self.dps_strings = await validate_input(self.hass, user_input, timeout)
                 return await self.async_step_pick_entity_type()
             except CannotConnect:
                 errors["base"] = "cannot_connect"

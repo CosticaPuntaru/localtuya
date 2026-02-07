@@ -2,6 +2,7 @@
 import asyncio
 import json.decoder
 import logging
+import socket
 import time
 from datetime import timedelta
 
@@ -34,6 +35,8 @@ from .const import (
     CONF_MODEL,
     CONF_PASSIVE_ENTITY,
     CONF_PROTOCOL_VERSION,
+    CONF_CONNECT_TIMEOUT,
+    DEFAULT_CONNECT_TIMEOUT,
     CONF_RESET_DPIDS,
     CONF_RESTORE_ON_RECONNECT,
     DATA_CLOUD,
@@ -188,15 +191,46 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
         self.info("Trying to connect to %s...", self._dev_config_entry[CONF_HOST])
 
         try:
-            self._interface = await pytuya.connect(
-                self._dev_config_entry[CONF_HOST],
-                self._dev_config_entry[CONF_DEVICE_ID],
-                self._local_key,
-                float(self._dev_config_entry[CONF_PROTOCOL_VERSION]),
-                self._dev_config_entry.get(CONF_ENABLE_DEBUG, False),
-                self,
+            # Resolve the hostname asynchronously to avoid blocking the main thread
+            host = self._dev_config_entry[CONF_HOST]
+            try:
+                # Use hass.async_add_executor_job to run socket.getaddrinfo in a thread
+                # This prevents DNS resolution from blocking the event loop
+                self.debug("Resolving host %s...", host)
+                addr_info = await self._hass.async_add_executor_job(
+                    socket.getaddrinfo, host, None
+                )
+                resolved_ip = addr_info[0][4][0]
+                self.debug("Resolved %s to %s", host, resolved_ip)
+            except Exception as ex:
+                self.error("Failed to resolve host %s: %s", host, ex)
+                return
+
+            # Connect with a timeout to avoid hanging the task
+            # Prioritize per-device timeout, then global entry timeout, then default
+            timeout = self._dev_config_entry.get(CONF_CONNECT_TIMEOUT)
+            if timeout is None:
+                timeout = self._config_entry.data.get(
+                    CONF_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT
+                )
+            self._interface = await asyncio.wait_for(
+                pytuya.connect(
+                    resolved_ip,
+                    self._dev_config_entry[CONF_DEVICE_ID],
+                    self._local_key,
+                    float(self._dev_config_entry[CONF_PROTOCOL_VERSION]),
+                    self._dev_config_entry.get(CONF_ENABLE_DEBUG, False),
+                    self,
+                ),
+                timeout=timeout,
             )
             self._interface.add_dps_to_request(self.dps_to_request)
+        except asyncio.TimeoutError:
+            self.warning(
+                "Connection attempt to %s timed out after %ss",
+                self._dev_config_entry[CONF_HOST],
+                timeout,
+            )
         except Exception as ex:  # pylint: disable=broad-except
             self.warning(
                 f"Failed to connect to {self._dev_config_entry[CONF_HOST]}: %s", ex
